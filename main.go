@@ -328,13 +328,13 @@ func processAccount(acc Account, wh Webhook) error {
 		if err := controlInstance(acc, "stop"); err != nil {
 			return fmt.Errorf("stop instance: %w", err)
 		}
-		notify(wh, fmt.Sprintf("🔴 Stopping Instance | %s", stats))
+		notify(wh, fmt.Sprintf("🛑 Stopping Instance | %s", stats))
 
 	case status == "Running":
-		log.Printf("🟢 Instance Running | %s", stats)
+		log.Printf("✅ Instance Running | %s", stats)
 
 	default:
-		log.Printf("🔴 Instance Stopped | %s", stats)
+		log.Printf("⏸️ Instance Stopped | %s", stats)
 	}
 
 	return nil
