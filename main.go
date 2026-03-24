@@ -256,12 +256,8 @@ func notify(wh Webhook, msg string) {
 	sendWebhook(wh, msg)
 }
 
-func setupLogger() {
-	exe, err := os.Executable()
-	if err != nil {
-		return
-	}
-	logPath := filepath.Join(filepath.Dir(exe), "cdt-monitor.log")
+func setupLogger(dir string) {
+	logPath := filepath.Join(dir, "cdt-monitor.log")
 
 	if data, err := os.ReadFile(logPath); err == nil {
 		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
@@ -282,9 +278,15 @@ func setupLogger() {
 }
 
 func main() {
-	setupLogger()
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(exe)
+	
+	setupLogger(dir)
 
-	cfgPath := flag.String("c", "conf.json", "config file path")
+	cfgPath := flag.String("c", filepath.Join(dir, "conf.json"), "config file path")
 	flag.Parse()
 
 	b, err := os.ReadFile(*cfgPath)
@@ -313,7 +315,7 @@ func processAccount(acc Account, wh Webhook) error {
 		return fmt.Errorf("get status: %w", err)
 	}
 
-	stats := fmt.Sprintf("%.2f / %.0f GB (%.1f%%)", traffic, quotaGB, (traffic/quotaGB)*100)
+	stats := fmt.Sprintf("%.2f GB / %.0f GB (%.1f%%)", traffic, quotaGB, (traffic/quotaGB)*100)
 
 	switch {
 	case status == "Stopped" && traffic < acc.ThresholdGB:
