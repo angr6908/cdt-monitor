@@ -1,0 +1,16 @@
+{
+  "accounts": [
+    {
+      "access_key_id": "LTAIxxxxxxxxxxxx",
+      "access_key_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "region_id": "ap-southeast-1",
+      "instance_id": "i-bp1xxxxxxxxxxxxxx",
+      "threshold_gb": 180.0,
+      "shutdown_mode": "KeepCharging"
+    }
+  ],
+  "webhook": {
+    "enabled": true,
+    "url": "generic://mastodon.social/api/v1/statuses?messagekey=status&@Authorization=Bearer+YOUR_ACCESS_TOKEN"
+  }
+}
