@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -51,7 +52,7 @@ func aliyunRequest(host, version, action, method string, extra map[string]string
 		"SignatureVersion": "1.0",
 		"Action":           action,
 		"Timestamp":        time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-		"SignatureNonce":    fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Int63()),
+		"SignatureNonce":   fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Int63()),
 	}
 	for k, v := range extra {
 		params[k] = v
@@ -191,7 +192,7 @@ func sendWebhook(wh Webhook, message string) {
 	if !wh.Enabled || !strings.HasPrefix(wh.URL, "generic://") {
 		return
 	}
-	parsed, err := url.Parse(strings.ReplaceAll(wh.URL, "generic://", "https://"))
+	parsed, err := url.Parse(strings.Replace(wh.URL, "generic://", "https://", 1))
 	if err != nil {
 		log.Printf("webhook: invalid URL: %v", err)
 		return
@@ -226,7 +227,11 @@ func sendWebhook(wh Webhook, message string) {
 	}
 
 	payload[messageKey] = message
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("webhook: marshal payload: %v", err)
+		return
+	}
 
 	parsed.RawQuery = forwarded.Encode()
 	req, err := http.NewRequest(reqMethod, parsed.String(), bytes.NewBuffer(body))
@@ -251,7 +256,34 @@ func notify(wh Webhook, msg string) {
 	sendWebhook(wh, msg)
 }
 
+func setupLogger() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	logPath := filepath.Join(filepath.Dir(exe), "cdt-monitor.log")
+
+	if data, err := os.ReadFile(logPath); err == nil {
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		if len(lines) > 9 {
+			lines = lines[len(lines)-9:]
+		}
+		if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+			return
+		}
+	}
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	log.SetFlags(log.Ldate | log.Ltime)
+	log.SetOutput(io.MultiWriter(os.Stderr, f))
+}
+
 func main() {
+	setupLogger()
+
 	cfgPath := flag.String("c", "conf.json", "config file path")
 	flag.Parse()
 
