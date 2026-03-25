@@ -197,7 +197,7 @@ func (acc Account) process(wh Webhook) error {
 	case status == "Running":
 		log.Printf("✅ Running | %s", stats)
 	default:
-		log.Printf("⏸️  Stopped | %s", stats)
+		log.Printf("⏸️ Stopped | %s", stats)
 	}
 	return nil
 }
