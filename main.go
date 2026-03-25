@@ -52,17 +52,12 @@ var (
 type prependWriter struct{ path string }
 
 func (w prependWriter) Write(p []byte) (int, error) {
-	var lines []string
-	if data, err := os.ReadFile(w.path); err == nil {
-		if s := strings.TrimSpace(string(data)); s != "" {
-			lines = strings.Split(s, "\n")
-		}
+	old, _ := os.ReadFile(w.path)
+	content := strings.TrimRight(string(p), "\n") + "\n" + string(old)
+	if lines := strings.SplitN(content, "\n", logRetainLines+2); len(lines) > logRetainLines+1 {
+		content = strings.Join(lines[:logRetainLines], "\n") + "\n"
 	}
-	lines = append([]string{strings.TrimRight(string(p), "\n")}, lines...)
-	if len(lines) > logRetainLines {
-		lines = lines[:logRetainLines]
-	}
-	os.WriteFile(w.path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	os.WriteFile(w.path, []byte(content), 0644)
 	return len(p), nil
 }
 
