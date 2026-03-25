@@ -113,10 +113,6 @@ func pEncode(s string) string {
 	return r
 }
 
-func isOverseas(region string) bool {
-	return !strings.HasPrefix(region, "cn-") || region == "cn-hongkong"
-}
-
 func getTrafficGB(acc Account) (float64, error) {
 	body, err := aliyunRequest("cdt.aliyuncs.com", "2021-08-13", "ListCdtInternetTraffic", "POST",
 		nil, acc.AccessKeyId, acc.AccessKeySecret)
@@ -126,20 +122,17 @@ func getTrafficGB(acc Account) (float64, error) {
 
 	var res struct {
 		TrafficDetails []struct {
-			BusinessRegionId string
-			Traffic          float64
+			Traffic float64
 		}
 	}
+	
 	if err := json.Unmarshal(body, &res); err != nil {
 		return 0, fmt.Errorf("getTrafficGB: %w", err)
 	}
 
-	targetOverseas := isOverseas(acc.RegionId)
 	var total float64
 	for _, d := range res.TrafficDetails {
-		if isOverseas(d.BusinessRegionId) == targetOverseas {
-			total += d.Traffic
-		}
+		total += d.Traffic
 	}
 	return total / (1024 * 1024 * 1024), nil
 }
