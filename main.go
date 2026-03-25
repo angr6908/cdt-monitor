@@ -20,6 +20,11 @@ import (
 	"time"
 )
 
+const (
+	quotaGB        = 200.0
+	logRetainLines = 1000
+)
+
 type Config struct {
 	Accounts []Account `json:"accounts"`
 	Webhook  Webhook   `json:"webhook"`
@@ -39,20 +44,36 @@ type Webhook struct {
 	URL     string `json:"url"`
 }
 
-const quotaGB = 200.0
+var (
+	httpClient    = &http.Client{Timeout: 15 * time.Second}
+	webhookClient = &http.Client{Timeout: 10 * time.Second}
+)
 
-var httpClient = &http.Client{Timeout: 15 * time.Second}
+type prependWriter struct{ path string }
 
-func aliyunRequest(host, version, action, method string, extra map[string]string, ak, secret string) ([]byte, error) {
+func (w prependWriter) Write(p []byte) (int, error) {
+	var lines []string
+	if data, err := os.ReadFile(w.path); err == nil {
+		if s := strings.TrimSpace(string(data)); s != "" {
+			lines = strings.Split(s, "\n")
+		}
+	}
+	lines = append([]string{strings.TrimRight(string(p), "\n")}, lines...)
+	if len(lines) > logRetainLines {
+		lines = lines[:logRetainLines]
+	}
+	os.WriteFile(w.path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	return len(p), nil
+}
+
+func (acc Account) ecsHost() string { return "ecs." + acc.RegionId + ".aliyuncs.com" }
+
+func (acc Account) request(host, version, action, method string, extra map[string]string) ([]byte, error) {
 	params := map[string]string{
-		"Format":           "JSON",
-		"Version":          version,
-		"AccessKeyId":      ak,
-		"SignatureMethod":  "HMAC-SHA1",
-		"SignatureVersion": "1.0",
-		"Action":           action,
-		"Timestamp":        time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-		"SignatureNonce":   fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Int63()),
+		"Format": "JSON", "Version": version, "AccessKeyId": acc.AccessKeyId,
+		"SignatureMethod": "HMAC-SHA1", "SignatureVersion": "1.0", "Action": action,
+		"Timestamp":      time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		"SignatureNonce": fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Int63()),
 	}
 	for k, v := range extra {
 		params[k] = v
@@ -70,23 +91,23 @@ func aliyunRequest(host, version, action, method string, extra map[string]string
 	}
 	canonical := strings.Join(parts, "&")
 
-	mac := hmac.New(sha1.New, []byte(secret+"&"))
-	mac.Write([]byte(method + "&" + pEncode("/") + "&" + pEncode(canonical)))
+	mac := hmac.New(sha1.New, []byte(acc.AccessKeySecret+"&"))
+	mac.Write([]byte(strings.ToUpper(method) + "&" + pEncode("/") + "&" + pEncode(canonical)))
 	sig := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 
-	reqURL := fmt.Sprintf("https://%s/?%s&Signature=%s", host, canonical, pEncode(sig))
-
-	var (
-		resp *http.Response
-		err  error
-	)
-	if strings.EqualFold(method, "POST") {
-		resp, err = httpClient.Post(reqURL, "application/x-www-form-urlencoded", nil)
-	} else {
-		resp, err = httpClient.Get(reqURL)
-	}
+	req, err := http.NewRequest(strings.ToUpper(method),
+		fmt.Sprintf("https://%s/?%s&Signature=%s", host, canonical, pEncode(sig)),
+		bytes.NewReader(nil))
 	if err != nil {
-		return nil, fmt.Errorf("http %s %s: %w", method, action, err)
+		return nil, err
+	}
+	if strings.EqualFold(method, "POST") {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", method, action, err)
 	}
 	defer resp.Body.Close()
 
@@ -94,42 +115,29 @@ func aliyunRequest(host, version, action, method string, extra map[string]string
 	if err != nil {
 		return nil, err
 	}
-
 	var apiErr struct {
 		Code    string `json:"Code"`
 		Message string `json:"Message"`
 	}
 	if json.Unmarshal(body, &apiErr) == nil && apiErr.Code != "" {
-		return nil, fmt.Errorf("API error [%s]: %s", apiErr.Code, apiErr.Message)
+		return nil, fmt.Errorf("API [%s]: %s", apiErr.Code, apiErr.Message)
 	}
 	return body, nil
 }
 
-func pEncode(s string) string {
-	r := url.QueryEscape(s)
-	r = strings.ReplaceAll(r, "+", "%20")
-	r = strings.ReplaceAll(r, "*", "%2A")
-	r = strings.ReplaceAll(r, "%7E", "~")
-	return r
-}
-
-func getTrafficGB(acc Account) (float64, error) {
-	body, err := aliyunRequest("cdt.aliyuncs.com", "2021-08-13", "ListCdtInternetTraffic", "POST",
-		nil, acc.AccessKeyId, acc.AccessKeySecret)
+func (acc Account) trafficGB() (float64, error) {
+	body, err := acc.request("cdt.aliyuncs.com", "2021-08-13", "ListCdtInternetTraffic", "POST", nil)
 	if err != nil {
 		return 0, err
 	}
-
 	var res struct {
 		TrafficDetails []struct {
-			Traffic float64
-		}
+			Traffic float64 `json:"Traffic"`
+		} `json:"TrafficDetails"`
 	}
-	
 	if err := json.Unmarshal(body, &res); err != nil {
-		return 0, fmt.Errorf("getTrafficGB: %w", err)
+		return 0, err
 	}
-
 	var total float64
 	for _, d := range res.TrafficDetails {
 		total += d.Traffic
@@ -137,49 +145,72 @@ func getTrafficGB(acc Account) (float64, error) {
 	return total / (1024 * 1024 * 1024), nil
 }
 
-func getInstanceStatus(acc Account) (string, error) {
-	body, err := aliyunRequest(ecsHost(acc), "2014-05-26", "DescribeInstanceStatus", "GET",
-		map[string]string{"RegionId": acc.RegionId, "InstanceId": acc.InstanceId},
-		acc.AccessKeyId, acc.AccessKeySecret)
+func (acc Account) status() (string, error) {
+	body, err := acc.request(acc.ecsHost(), "2014-05-26", "DescribeInstanceStatus", "GET",
+		map[string]string{"RegionId": acc.RegionId, "InstanceId": acc.InstanceId})
 	if err != nil {
 		return "", err
 	}
-
 	var res struct {
 		InstanceStatuses struct {
-			InstanceStatus []struct{ Status string }
-		}
+			InstanceStatus []struct {
+				Status string `json:"Status"`
+			} `json:"InstanceStatus"`
+		} `json:"InstanceStatuses"`
 	}
 	if err := json.Unmarshal(body, &res); err != nil {
-		return "", fmt.Errorf("getInstanceStatus: %w", err)
+		return "", err
 	}
-
-	statuses := res.InstanceStatuses.InstanceStatus
-	if len(statuses) == 0 {
-		return "", fmt.Errorf("getInstanceStatus: no status returned")
+	if len(res.InstanceStatuses.InstanceStatus) == 0 {
+		return "", fmt.Errorf("no status returned for %s", acc.InstanceId)
 	}
-	return statuses[0].Status, nil
+	return res.InstanceStatuses.InstanceStatus[0].Status, nil
 }
 
-func controlInstance(acc Account, action string) error {
-	apiAction := "StartInstance"
-	params := map[string]string{"RegionId": acc.RegionId, "InstanceId": acc.InstanceId}
-	if action == "stop" {
-		apiAction = "StopInstance"
-		if acc.ShutdownMode == "" {
-			acc.ShutdownMode = "KeepCharging"
-		}
-		params["StoppedMode"] = acc.ShutdownMode
+func (acc Account) control(stop bool) error {
+	action, params := "StartInstance", map[string]string{"RegionId": acc.RegionId, "InstanceId": acc.InstanceId}
+	if stop {
+		action, params["StoppedMode"] = "StopInstance", acc.ShutdownMode
 	}
-	_, err := aliyunRequest(ecsHost(acc), "2014-05-26", apiAction, "GET", params, acc.AccessKeyId, acc.AccessKeySecret)
+	_, err := acc.request(acc.ecsHost(), "2014-05-26", action, "GET", params)
 	return err
 }
 
-func ecsHost(acc Account) string {
-	return fmt.Sprintf("ecs.%s.aliyuncs.com", acc.RegionId)
+func (acc Account) process(wh Webhook) error {
+	traffic, err := acc.trafficGB()
+	if err != nil {
+		return fmt.Errorf("get traffic: %w", err)
+	}
+	status, err := acc.status()
+	if err != nil {
+		return fmt.Errorf("get status: %w", err)
+	}
+
+	stats := fmt.Sprintf("%.2f / %.0f GB (%.1f%%)", traffic, quotaGB, traffic/quotaGB*100)
+
+	switch {
+	case status == "Stopped" && traffic < acc.ThresholdGB:
+		if err := acc.control(false); err != nil {
+			return fmt.Errorf("start: %w", err)
+		}
+		logNotify(wh, "🟢 Starting | "+stats)
+	case status == "Running" && traffic >= acc.ThresholdGB:
+		if err := acc.control(true); err != nil {
+			return fmt.Errorf("stop: %w", err)
+		}
+		logNotify(wh, "🛑 Stopping | "+stats)
+	case status == "Running":
+		log.Printf("✅ Running | %s", stats)
+	default:
+		log.Printf("⏸️  Stopped | %s", stats)
+	}
+	return nil
 }
 
-var webhookClient = &http.Client{Timeout: 10 * time.Second}
+func logNotify(wh Webhook, msg string) {
+	log.Print(msg)
+	sendWebhook(wh, msg)
+}
 
 func sendWebhook(wh Webhook, message string) {
 	if !wh.Enabled || !strings.HasPrefix(wh.URL, "generic://") {
@@ -191,9 +222,7 @@ func sendWebhook(wh Webhook, message string) {
 		return
 	}
 
-	headers := make(http.Header)
-	payload := make(map[string]interface{})
-	forwarded := url.Values{}
+	headers, payload, forwarded := make(http.Header), make(map[string]interface{}), url.Values{}
 	contentType, messageKey, reqMethod := "application/json", "message", "POST"
 
 	for key, values := range parsed.Query() {
@@ -220,16 +249,12 @@ func sendWebhook(wh Webhook, message string) {
 	}
 
 	payload[messageKey] = message
-	body, err := json.Marshal(payload)
-	if err != nil {
-		log.Printf("webhook: marshal payload: %v", err)
-		return
-	}
-
+	body, _ := json.Marshal(payload)
 	parsed.RawQuery = forwarded.Encode()
-	req, err := http.NewRequest(reqMethod, parsed.String(), bytes.NewBuffer(body))
+
+	req, err := http.NewRequest(reqMethod, parsed.String(), bytes.NewReader(body))
 	if err != nil {
-		log.Printf("webhook: build request: %v", err)
+		log.Printf("webhook: %v", err)
 		return
 	}
 	req.Header = headers
@@ -237,47 +262,27 @@ func sendWebhook(wh Webhook, message string) {
 
 	resp, err := webhookClient.Do(req)
 	if err != nil {
-		log.Printf("webhook: send: %v", err)
+		log.Printf("webhook: %v", err)
 		return
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	io.Copy(io.Discard, resp.Body)
 }
 
-func notify(wh Webhook, msg string) {
-	log.Print(msg)
-	sendWebhook(wh, msg)
-}
-
-func setupLogger(dir string) {
-	logPath := filepath.Join(dir, "cdt-monitor.log")
-
-	if data, err := os.ReadFile(logPath); err == nil {
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		if len(lines) > 9 {
-			lines = lines[len(lines)-9:]
-		}
-		if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
-			return
-		}
-	}
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return
-	}
-	log.SetFlags(log.Ldate | log.Ltime)
-	log.SetOutput(io.MultiWriter(os.Stderr, f))
+func pEncode(s string) string {
+	r := url.QueryEscape(s)
+	r = strings.ReplaceAll(r, "+", "%20")
+	r = strings.ReplaceAll(r, "*", "%2A")
+	r = strings.ReplaceAll(r, "%7E", "~")
+	return r
 }
 
 func main() {
-	exe, err := os.Executable()
-	if err != nil {
-		return
-	}
+	exe, _ := os.Executable()
 	dir := filepath.Dir(exe)
-	
-	setupLogger(dir)
+
+	log.SetFlags(log.Ldate | log.Ltime)
+	log.SetOutput(io.MultiWriter(os.Stderr, prependWriter{filepath.Join(dir, "cdt-monitor.log")}))
 
 	cfgPath := flag.String("c", filepath.Join(dir, "conf.json"), "config file path")
 	flag.Parse()
@@ -290,45 +295,15 @@ func main() {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		log.Fatalf("parse config: %v", err)
 	}
+	for i, acc := range cfg.Accounts {
+		if acc.AccessKeyId == "" || acc.AccessKeySecret == "" || acc.RegionId == "" || acc.InstanceId == "" || acc.ShutdownMode == "" || acc.ThresholdGB <= 0 {
+			log.Fatalf("account[%d]: missing required fields", i)
+		}
+	}
 
 	for _, acc := range cfg.Accounts {
-		if err := processAccount(acc, cfg.Webhook); err != nil {
-			log.Printf("⚠️  skipped: %v", err)
+		if err := acc.process(cfg.Webhook); err != nil {
+			log.Printf("⚠️  [%s] %v", acc.InstanceId, err)
 		}
 	}
-}
-
-func processAccount(acc Account, wh Webhook) error {
-	traffic, err := getTrafficGB(acc)
-	if err != nil {
-		return fmt.Errorf("get traffic: %w", err)
-	}
-	status, err := getInstanceStatus(acc)
-	if err != nil {
-		return fmt.Errorf("get status: %w", err)
-	}
-
-	stats := fmt.Sprintf("%.2f GB / %.0f GB (%.1f%%)", traffic, quotaGB, (traffic/quotaGB)*100)
-
-	switch {
-	case status == "Stopped" && traffic < acc.ThresholdGB:
-		if err := controlInstance(acc, "start"); err != nil {
-			return fmt.Errorf("start instance: %w", err)
-		}
-		notify(wh, fmt.Sprintf("🟢 Starting Instance | %s", stats))
-
-	case status == "Running" && traffic >= acc.ThresholdGB:
-		if err := controlInstance(acc, "stop"); err != nil {
-			return fmt.Errorf("stop instance: %w", err)
-		}
-		notify(wh, fmt.Sprintf("🛑 Stopping Instance | %s", stats))
-
-	case status == "Running":
-		log.Printf("✅ Instance Running | %s", stats)
-
-	default:
-		log.Printf("⏸️ Instance Stopped | %s", stats)
-	}
-
-	return nil
 }
