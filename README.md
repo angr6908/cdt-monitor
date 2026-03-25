@@ -5,9 +5,7 @@ Please refer to the [Shoutrrr documentation](https://containrrr.dev/shoutrrr/v0.
 ### Caddyfile
 ```
 example.com {
-	templates
-	header Content-Type "text/html; charset=utf-8"
-	respond `<meta name="viewport" content="width=device-width"><style>:root{color-scheme:light dark}body{font:14px monospace;white-space:pre-wrap}</style>{{readFile "cdt-monitor.log"}}`
+    file_server { index cdt-monitor.log }
 }
 ```
 ### compose.yml
