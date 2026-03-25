@@ -5,7 +5,9 @@ Please refer to the [Shoutrrr documentation](https://containrrr.dev/shoutrrr/v0.
 ### Caddyfile
 ```
 example.com {
-    file_server { index cdt-monitor.log }
+	file_server {
+		index cdt-monitor.log
+	}
 }
 ```
 ### compose.yml
