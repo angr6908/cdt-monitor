@@ -1,4 +1,8 @@
 # cdt-monitor
+## Cron Job
+```
+*	*	*	*	*	/path/to/cdt-monitor
+```
 ## Webhook Notifications
 Please refer to the [Shoutrrr documentation](https://containrrr.dev/shoutrrr/v0.8/services/generic/).
 ## Log Serving with Caddy
