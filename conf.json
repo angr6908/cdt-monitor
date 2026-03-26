@@ -7,6 +7,14 @@
       "instance_id": "i-bp1xxxxxxxxxxxxxx",
       "threshold_gb": 180.0,
       "shutdown_mode": "KeepCharging"
+    },
+    {
+      "access_key_id": "LTAIxxxxxxxxxxxx",
+      "access_key_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "region_id": "cn-hongkong",
+      "instance_id": "i-bp1xxxxxxxxxxxxxx",
+      "threshold_gb": 160.0,
+      "shutdown_mode": "KeepCharging"
     }
   ],
   "webhook": {
