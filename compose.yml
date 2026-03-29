@@ -22,4 +22,5 @@ services:
 
       - WEBHOOK_ENABLED=false
       - WEBHOOK_URL=generic://
+      
       # - NAT64_DNS=2a01:4f8:c2c:123f::1
