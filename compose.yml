@@ -3,7 +3,11 @@ services:
     image: ghcr.io/angr6908/cdt-monitor:latest
     restart: always
     container_name: cdt-monitor
-    network_mode: host
+    
+    # For IPv6-Only
+    # dns:
+      # - 2a01:4f8:c2c:123f::1
+    
     volumes:
       - ./logs:/logs
     environment:
@@ -23,5 +27,3 @@ services:
 
       - WEBHOOK_ENABLED=false
       - WEBHOOK_URL=generic://
-
-      # - NAT64_DNS=2a01:4f8:c2c:123f::1
