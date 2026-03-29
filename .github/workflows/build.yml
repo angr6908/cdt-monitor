@@ -47,7 +47,7 @@ jobs:
           #!/bin/sh
           set -e
           ln -sf /logs/cdt-monitor.log /app/cdt-monitor.log
-          [ -n "${NAT64_DNS:-}" ] && { echo "nameserver ${NAT64_DNS}" > /tmp/r; cat /etc/resolv.conf >> /tmp/r; cat /tmp/r > /etc/resolv.conf; }
+          [ -n "${NAT64_DNS:-}" ] && { echo "nameserver ${NAT64_DNS}" | cat - /etc/resolv.conf > /etc/resolv.conf; }
           accounts="["; first=1; i=0
           while true; do
             eval "key=\${ACCOUNT_${i}_ACCESS_KEY_ID:-}"; [ -z "$key" ] && break
