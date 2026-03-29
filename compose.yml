@@ -2,7 +2,8 @@ services:
   cdt-monitor:
     image: ghcr.io/angr6908/cdt-monitor:latest
     restart: always
-    container_name: cdt-monitor    
+    container_name: cdt-monitor
+    network_mode: host
     volumes:
       - ./logs:/logs
     environment:
