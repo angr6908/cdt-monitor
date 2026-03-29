@@ -1,0 +1,26 @@
+services:
+  cdt-monitor:
+    image: ghcr.io/angr6908/cdt-monitor:latest
+    restart: always
+    container_name: cdt-monitor
+    volumes:
+      - ./logs:/logs
+    environment:
+      - ACCOUNT_0_ACCESS_KEY_ID=LTAI5tXxxxxxxxxxxxxxxxxx
+      - ACCOUNT_0_ACCESS_KEY_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      - ACCOUNT_0_REGION_ID=cn-hangzhou
+      - ACCOUNT_0_INSTANCE_ID=i-bp1xxxxxxxxxxxxxxxxx
+      - ACCOUNT_0_THRESHOLD_GB=180
+      - ACCOUNT_0_SHUTDOWN_MODE=KeepCharging
+
+      - ACCOUNT_1_ACCESS_KEY_ID=LTAI5tYyyyyyyyyyyyyyyy
+      - ACCOUNT_1_ACCESS_KEY_SECRET=yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+      - ACCOUNT_1_REGION_ID=cn-shanghai
+      - ACCOUNT_1_INSTANCE_ID=i-uf6xxxxxxxxxxxxxxxxx
+      - ACCOUNT_1_THRESHOLD_GB=180
+      - ACCOUNT_1_SHUTDOWN_MODE=KeepCharging
+
+      - WEBHOOK_ENABLED=false
+      - WEBHOOK_URL=generic://
+
+      # - NAT64_DNS=2a01:4f8:c2c:123f::1
